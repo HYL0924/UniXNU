@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: HYL0924/UniXNU-sheng
-          ref: 4d1861154aa1907b43680b966e604e3638f4ff09
+          ref: 62feba6ea210467ff5e8bfbd0c589b2444012cca
           path: device
           submodules: recursive
           persist-credentials: false
@@ -96,6 +96,8 @@ jobs:
           df -h .
           python3 -m unittest discover -s scripts/unixnu -p 'test_bootimg.py'
           python3 -m unittest discover -s scripts/unixnu -p 'test_vendor_boot.py'
+          python3 -m unittest discover -s tests/build -p 'test_weak_defaults.py'
+          python3 -m unittest discover -s tests/build -p 'test_loader_release.py'
       - name: Fetch and validate runtime firmware
         run: |
           python3 scripts/ci/fetch-firmware.py \
@@ -137,7 +139,8 @@ jobs:
             ${{ env.WORK }}/tree/.cache/xnu-work
             ${{ env.WORK }}/tree/.cache/fakeroot
             ${{ env.WORK }}/tree/build/xnu
-          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/arm64/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
+            ${{ env.WORK }}/xnu-inputs.json
+          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
       - name: Configure and fetch pinned sources
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -170,7 +173,8 @@ jobs:
             ${{ env.WORK }}/tree/.cache/xnu-work
             ${{ env.WORK }}/tree/.cache/fakeroot
             ${{ env.WORK }}/tree/build/xnu
-          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/arm64/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
+            ${{ env.WORK }}/xnu-inputs.json
+          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
       - name: Save graphics compiler cache
         if: always() && steps.graphics-cache.outcome == 'success' && steps.graphics-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/tree/build/mesa-tu-ios27/build.ninja') != ''
         uses: actions/cache/save@v4
@@ -194,6 +198,7 @@ jobs:
         if: always() && hashFiles('out/sheng/*/*/runtime/data.dbr') != ''
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: installation-seed-ipados27
           path: |
             ${{ env.WORK }}/runtime/data.dbr
@@ -209,6 +214,7 @@ jobs:
         id: boot
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: boot-ipados27
           path: ${{ env.WORK }}/downloads/boot.img
           if-no-files-found: error
@@ -217,6 +223,7 @@ jobs:
         id: vendor
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: vendor-boot-ipados27
           path: ${{ env.WORK }}/downloads/vendor_boot.img
           if-no-files-found: error
@@ -225,6 +232,7 @@ jobs:
         id: userdata
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: userdata-root-ipados27
           path: ${{ env.WORK }}/downloads/userdata-root.img
           if-no-files-found: error
@@ -233,6 +241,7 @@ jobs:
       - name: Upload checksums and build reports
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: checksums-ipados27
           path: |
             ${{ env.WORK }}/downloads/SHA256SUMS
@@ -260,6 +269,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: image-build-logs
           path: ${{ env.WORK }}/logs/*.log
           if-no-files-found: warn

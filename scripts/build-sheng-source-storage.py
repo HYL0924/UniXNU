@@ -36,11 +36,14 @@ def weak_defaults(source):
     """
     import re
     lines = []
-    for line in source.read_text().splitlines():
-        line = line.strip()
-        if not (line.startswith('extern ') and line.endswith('__attribute__((weak_import));')):
-            continue
-        decl = line[len('extern '):-len('__attribute__((weak_import));')].replace('__attribute__((weak_import))', '').strip()
+    text = source.read_text()
+    # An extern declaration can span several lines and declare several arrays
+    # or counters. Parsing one line dropped the whole optional declaration and
+    # left arm64e authenticated references unresolved at the static kernel link.
+    for match in re.finditer(r'^\s*extern\s+([^;]*\bweak_import\b[^;]*);', text, re.M):
+        decl = match.group(1).replace('__attribute__((weak_import))', '')
+        decl = re.sub(r'/\*.*?\*/|//[^\n]*', '', decl, flags=re.S)
+        decl = ' '.join(decl.split())
         call = re.match(r'^(.*?[\s*])([A-Za-z_]\w*)\s*\((.*)\)$', decl)
         if call and '(*' not in decl.split(call.group(2))[0]:
             ret = call.group(1).strip()

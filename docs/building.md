@@ -202,6 +202,9 @@ The device feed and Sm8550Platform catalog entry select the same SoC revision,
 including the GENI UART, QUP DMA and video operations used by the board archive.
 The workflow checks those files before compiling and preserves XNU bootstrap
 objects and Rust build outputs for retries with the same sources and toolchain.
+The iPadOS kernel includes the GPU descriptor-close notification and validates
+loader-memory release against its existing physical-aperture policy. macOS-only
+board probes are excluded from iPadOS; diagnostics use the selected display ABI.
 
 After all image checks pass, the summary links three separate artifacts:
 `boot-ipados27`, `vendor-boot-ipados27` and `userdata-root-ipados27`. Download

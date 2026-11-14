@@ -187,6 +187,8 @@ Wi-Fi 源码按锁定清单在运行组件打包前准备；Git 使用精确提�
 设备 feed 与 Sm8550Platform 组件目录固定到同一份 SoC 提交，包含板级归档需要的
 GENI UART、QUP DMA 和视频操作。workflow 在编译前检查这些文件，并保留相同源码
 和工具链下的 XNU bootstrap 对象及 Rust 构建产物，供重试复用。
+iPadOS 内核提供 GPU 描述符关闭通知，并按现有物理孔径策略预检加载器内存释放。
+macOS 专用探针不会链接进 iPadOS，诊断使用当前系统对应的显示 ABI。
 
 全部镜像检查通过后，摘要提供 `boot-ipados27`、`vendor-boot-ipados27` 和
 `userdata-root-ipados27` 三个独立产物的下载链接。请下载并解压同一次构建的三个

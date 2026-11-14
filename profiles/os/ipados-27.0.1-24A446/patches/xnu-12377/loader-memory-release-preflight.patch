@@ -1,0 +1,33 @@
+Provide the loader-memory release preflight used by RamBlock.
+
+The existing iPadOS physical-aperture restriction is preserved. Unsupported,
+unaligned, empty or overflowing ranges are retained; accepted whole pages
+must first accept read/write protections through ml_static_protect.
+
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -2146,6 +2146,24 @@
+ 	ml_static_mfree_queue_up = false;
+ }
+ 
++
++/*
++ * Validate a loader range before IODTFreeLoaderInfo releases it. iPadOS keeps
++ * ml_static_mfree's existing physical-aperture policy: a static image tail
++ * without an aperture alias is retained instead of changing its mappings.
++ */
++bool ml_static_mfree_prepare(vm_offset_t vaddr, vm_size_t size);
++
++bool
++ml_static_mfree_prepare(vm_offset_t vaddr, vm_size_t size)
++{
++	if ((vaddr & PAGE_MASK) != 0 || size < PAGE_SIZE || vaddr < physmap_base ||
++	    size > (vm_size_t)(~(vm_offset_t)0 - vaddr)) {
++		return false;
++	}
++	return ml_static_protect(vaddr, trunc_page(size), VM_PROT_READ | VM_PROT_WRITE) == KERN_SUCCESS;
++}
++
+ /*
+  *	Routine:        ml_static_mfree
+  *	Function:

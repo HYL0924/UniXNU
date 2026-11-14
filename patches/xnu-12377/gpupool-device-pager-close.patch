@@ -1,4 +1,4 @@
-IOKit: report when no mapping of a physical descriptor's pages is left
+IOKit: report when no mapping of a physical descriptor's pages is left (shared ARM64e API)
 
 A driver that hands physical pages to user tasks through an IOGeneralMemoryDescriptor of physical ranges
 cannot tell from the descriptor's free whether its pages are still mapped: a task can copy its IOKit mapping

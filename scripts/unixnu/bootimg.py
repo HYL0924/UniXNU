@@ -75,7 +75,11 @@ def build(ctx, uefi, fd, dtb, ramdisk=None, output=None):
     mkbootimg = uefi / 'Resources/Scripts/mkbootimg.py'
     if not mkbootimg.is_file():
         raise Error(f'{mkbootimg} missing: --uefi must be a Mu-Silicium checkout')
-    for path, what in ((fd, 'firmware volume (--fd)'), (dtb, 'device tree (--dtb)')):
+    append_dtb = image.get('append_dtb', True)
+    inputs = [(fd, 'firmware volume (--fd)')]
+    if append_dtb:
+        inputs.append((dtb, 'device tree (--dtb)'))
+    for path, what in inputs:
         if not path or not Path(path).is_file():
             if path == fd:
                 raise Error(f'firmware volume not found: {fd}; run ./unixnu build firmware --uefi {uefi}')
@@ -90,8 +94,8 @@ def build(ctx, uefi, fd, dtb, ramdisk=None, output=None):
     with tempfile.TemporaryDirectory(prefix='unixnu-bootimg-') as scratch_name:
         scratch = Path(scratch_name)
         shim = compile_shim(uefi, base, size, requires_header, scratch)
-        tree = patch_dtb(Path(dtb).read_bytes(), ctx.board.get('bootimg', {}).get('dtb_node', []), scratch)
-        if tree[:4] != b'\xd0\x0d\xfe\xed' or struct.unpack_from('>I', tree, 4)[0] != len(tree):
+        tree = patch_dtb(Path(dtb).read_bytes(), ctx.board.get('bootimg', {}).get('dtb_node', []), scratch) if append_dtb else b''
+        if append_dtb and (tree[:4] != b'\xd0\x0d\xfe\xed' or struct.unpack_from('>I', tree, 4)[0] != len(tree)):
             raise Error('invalid compiled device tree')
         combined = shim + firmware
         # [bootimg.image] kernel_compression selects the kernel encoding. The
@@ -118,7 +122,7 @@ def build(ctx, uefi, fd, dtb, ramdisk=None, output=None):
         run(command, capture=True)
         report = verify(out, combined, tree, ramdisk_path, image, compression)
     report.update(image_sha256=sha256_file(out), image_bytes=out.stat().st_size, fd_sha256=sha256_file(fd),
-                  dtb_sha256=sha256_file(dtb), shim_bytes=len(shim), hardware_tested=False)
+                  dtb_sha256=sha256_file(dtb) if append_dtb else None, shim_bytes=len(shim), hardware_tested=False)
     (out.parent / 'boot.json').write_text(json.dumps(report, indent=2) + '\n')
     log(f'bootimg: {out} ({out.stat().st_size} bytes)')
     return out

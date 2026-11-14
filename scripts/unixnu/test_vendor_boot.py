@@ -95,6 +95,14 @@ class VendorBoot(unittest.TestCase):
         with self.assertRaises(vendor_boot.Error):
             vendor_boot.parse(b'ANDROID!' + b'\0' * PAGE)
 
+    def test_vbmeta_must_leave_room_for_the_avb_footer(self):
+        parts = vendor_boot.parse(self.stock.read_bytes())
+        parts['partition_bytes'] = 5 * PAGE + 640
+        # The relocated vbmeta ends exactly at the partition boundary. Its
+        # last 64 bytes must not be overwritten by the footer.
+        with self.assertRaises(vendor_boot.Error):
+            vendor_boot.pack(parts, b'N' * PAGE)
+
     def test_an_empty_ramdisk_is_allowed(self):
         out = self.dir / 'empty.img'
         vendor_boot.build(self.stock, None, out)

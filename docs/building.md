@@ -164,6 +164,31 @@ The candidate names and the display or kernelcache inputs come from the device r
 
 The workflow runs kernel, userdata and payload. Package, firmware and boot image commands run locally on supported macOS or Linux hosts. Check the workflow and account runner settings before using hosted builds.
 
+### Downloadable iPadOS 27 images
+
+The `Downloadable iPadOS images` workflow builds the pinned Xiaomi Pad 6S Pro
+port and iPadOS 27 (24A446) together. Set `UNIXNU_UNIQUE_CHIP_ID` to the
+installation's eight-digit hexadecimal platform seed. For a first installation,
+select `init_data`; subsequent builds restore the same Data seed from the cache.
+Retain the separate `installation-seed-ipados27` backup before its seven-day
+artifact retention expires. A missing seed requires an explicit first install.
+
+The workflow generates and verifies signed root policies from the exact raw
+IPSW windows before compiling the kernel. It includes the corresponding
+`OS.vroot` and `SystemOS.vroot` block tables in `userdata-root.img`. The kernel
+and payload share the same Data seed UUID. The GKI `boot.img` uses a v4 header,
+an empty ramdisk and the stock vendor device tree. `vendor_boot.img` carries
+the FAT payload at a relocated load address and preserves the stock device
+tree, bootconfig and AVB metadata.
+
+After all image checks pass, the summary links three separate artifacts:
+`boot-ipados27`, `vendor-boot-ipados27` and `userdata-root-ipados27`. Download
+and extract all three from the same run, then check the `SHA256SUMS` in
+`checksums-ipados27`. Downloads require GitHub sign-in and expire after seven
+days. Build reports record `hardware_tested: false`; successful packaging does
+not establish a boot result on a physical tablet. Flashing userdata replaces
+the device's existing data; follow [Boot the image](/guide/boot) for installation.
+
 ## Linux host
 
 The installer supports apt, dnf, pacman and zypper on glibc Linux. Use `--package-manager none` with prepared dependencies and `--llvm-config FILE` for a specific host LLVM. See [Linux requirements](/guide/requirements#linux).

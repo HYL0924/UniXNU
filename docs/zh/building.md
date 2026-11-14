@@ -155,6 +155,26 @@ cp out/<device>/<os_profile>/<config>/kernel/kernel.macho \
 
 workflow 运行 kernel、userdata 和 payload。package、firmware 和 boot image 命令在受支持的 macOS 或 Linux 主机上执行。使用托管构建前检查 workflow 和账户 runner 配置。
 
+### 下载 iPadOS 27 镜像
+
+`Downloadable iPadOS images` workflow 将固定版本的小米平板 6S Pro 设备支持与
+iPadOS 27（24A446）一起构建。将 `UNIXNU_UNIQUE_CHIP_ID` secret 设置为本次安装的
+8 位十六进制平台标识。首次安装选择 `init_data`，后续构建从缓存恢复同一份 Data
+种子。请在产物的 7 天保留期到期前保存独立的 `installation-seed-ipados27` 备份。
+种子缺失时，必须明确选择首次安装才能重新生成。
+
+workflow 从 IPSW 的实际原始窗口生成并验证签名根策略，再编译内核；相应的
+`OS.vroot` 和 `SystemOS.vroot` 校验表写入 `userdata-root.img`。内核与 payload
+绑定同一份 Data 种子 UUID。GKI `boot.img` 使用 v4 header、空 ramdisk 和原厂
+vendor 设备树；`vendor_boot.img` 在调整后的加载地址携带 FAT payload，保留原厂
+设备树、bootconfig 和 AVB 元数据。
+
+全部镜像检查通过后，摘要提供 `boot-ipados27`、`vendor-boot-ipados27` 和
+`userdata-root-ipados27` 三个独立产物的下载链接。请下载并解压同一次构建的三个
+产物，用 `checksums-ipados27` 中的 `SHA256SUMS` 校验。下载需要登录 GitHub，
+产物在 7 天后过期。报告中的 `hardware_tested: false` 表示尚未完成实体平板启动
+验证。刷写 userdata 会替换设备上的现有数据，安装步骤见[启动镜像](/zh/guide/boot)。
+
 ## Linux 主机
 
 安装脚本在 glibc Linux 上支持 apt、dnf、pacman 和 zypper。依赖已准备好时使用 `--package-manager none`，指定主机 LLVM 时使用 `--llvm-config FILE`。详见 [Linux 要求](/zh/guide/requirements#linux)。

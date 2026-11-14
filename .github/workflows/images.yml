@@ -1,0 +1,193 @@
+name: Downloadable iPadOS images
+
+on:
+  workflow_dispatch:
+    inputs:
+      init_data:
+        description: Create a Data seed for a FIRST installation (retain the seed backup)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipados-images-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+  HOMEBREW_NO_ENV_HINTS: 1
+  UNIXNU_DEVICE: ${{ github.workspace }}/device
+  UNIXNU_UEFI: ${{ github.workspace }}/uefi
+  WORK: out/sheng/ipados-27.0.1-24A446/sheng_ipados27
+
+jobs:
+  images:
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU-sheng
+          ref: 68800685763d755c368775b848dd703fb3f8a3ce
+          path: device
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/uefi-sheng
+          ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
+          path: uefi
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check installation identity
+        id: installation
+        env:
+          SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, re
+          seed = os.environ['SEED']
+          if not re.fullmatch('[0-9a-fA-F]{8}', seed) or int(seed, 16) == 0:
+              raise SystemExit('Set UNIXNU_UNIQUE_CHIP_ID to the installation platform seed (8 hex digits)')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('cache=ipados27-data-v1-' + hashlib.sha256(seed.encode()).hexdigest()[:16] + '\n')
+          PY
+      - uses: actions/cache/restore@v4
+        id: data-cache
+        with:
+          path: ${{ env.WORK }}/runtime/data.dbr
+          key: ${{ steps.installation.outputs.cache }}
+      - name: Require a preserved seed or an explicit first install
+        env:
+          INIT_DATA: ${{ inputs.init_data }}
+        run: |
+          if [ ! -f "$WORK/runtime/data.dbr" ] && [ "$INIT_DATA" != true ]; then
+            echo 'No saved Data seed. Restore the original installation seed or select init_data for a FIRST installation.' >&2
+            exit 1
+          fi
+      - name: Install and check tools
+        run: |
+          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 blacktop/tap/ipsw
+          {
+            echo "$HOME/.cargo/bin"
+            echo "$(brew --prefix bison)/bin"
+          } >> "$GITHUB_PATH"
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+          for tool in git make cmake ninja dtc mformat mcopy aea compression_tool xcodebuild ipsw; do
+            command -v "$tool"
+          done
+          xcodebuild -version
+          df -h .
+      - name: Configure and fetch pinned sources
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./unixnu defconfig sheng_ipados27_defconfig --os 27
+          ./unixnu fetch --os 27
+          ./unixnu tree --os 27
+      - name: Build and verify userdata and root policies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/images.py prepare --os 27
+      - name: Build matching runtime, kernel, payload and firmware
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+          INIT_DATA: ${{ inputs.init_data }}
+        run: |
+          args=()
+          if [ ! -f "$WORK/runtime/data.dbr" ] && [ "$INIT_DATA" = true ]; then args+=(--init-data); fi
+          ./unixnu build kernel package payload firmware --os 27 "${args[@]}"
+      - uses: actions/cache/save@v4
+        if: always() && steps.installation.outcome == 'success' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/runtime/data.dbr') != ''
+        with:
+          path: ${{ env.WORK }}/runtime/data.dbr
+          key: ${{ steps.installation.outputs.cache }}
+      - name: Back up installation seed
+        if: always() && hashFiles('out/sheng/*/*/runtime/data.dbr') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: installation-seed-ipados27
+          path: |
+            ${{ env.WORK }}/runtime/data.dbr
+            ${{ env.WORK }}/runtime/inputs.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Pack and verify all three images
+        run: |
+          python3 scripts/ci/images.py pack --os 27 \
+            --stock-vendor-boot device/.cache/firmware/sheng/porting-inputs/vendor_boot.img \
+            --ramdisk-addr 0x40000000
+      - name: Upload boot image
+        id: boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-ipados27
+          path: ${{ env.WORK }}/downloads/boot.img
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload vendor boot image
+        id: vendor
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-boot-ipados27
+          path: ${{ env.WORK }}/downloads/vendor_boot.img
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload userdata image
+        id: userdata
+        uses: actions/upload-artifact@v4
+        with:
+          name: userdata-root-ipados27
+          path: ${{ env.WORK }}/downloads/userdata-root.img
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
+      - name: Upload checksums and build reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-ipados27
+          path: |
+            ${{ env.WORK }}/downloads/SHA256SUMS
+            ${{ env.WORK }}/downloads/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Download links
+        env:
+          BOOT_URL: ${{ steps.boot.outputs.artifact-url }}
+          VENDOR_URL: ${{ steps.vendor.outputs.artifact-url }}
+          USERDATA_URL: ${{ steps.userdata.outputs.artifact-url }}
+        run: |
+          {
+            echo '## Xiaomi Pad 6S Pro — iPadOS 27 (24A446)'
+            echo
+            echo "- [boot.img]($BOOT_URL)"
+            echo "- [vendor_boot.img]($VENDOR_URL)"
+            echo "- [userdata-root.img]($USERDATA_URL)"
+            echo
+            echo 'Download and extract all three archives from this same run. Check SHA256SUMS.'
+            echo 'Keep the installation-seed-ipados27 backup for all future builds.'
+            echo 'Image contents and hashes were verified on the builder; hardware boot remains untested.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-build-logs
+          path: ${{ env.WORK }}/logs/*.log
+          if-no-files-found: warn
+          retention-days: 7

@@ -91,8 +91,9 @@ def pack(parts, ramdisk, ramdisk_address=None):
     bootconfig_start = align(table_start + len(parts['table']))
     vbmeta_start = align(bootconfig_start + len(parts['bootconfig']))
     total = vbmeta_start + len(parts['vbmeta'])
-    if total > parts['partition_bytes']:
-        raise Error(f'image needs {total} bytes but the partition holds {parts["partition_bytes"]}')
+    required = total + (64 if parts['vbmeta'] else 0)
+    if required > parts['partition_bytes']:
+        raise Error(f'image needs {required} bytes but the partition holds {parts["partition_bytes"]}')
 
     header = bytearray(parts['header'])
     struct.pack_into('<I', header, 24, len(ramdisk))

@@ -1,0 +1,55 @@
+name: Inspect cached native layout
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Exact XNU cache key from the image build
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  UNIXNU_DEVICE: ${{ github.workspace }}/device
+  WORK: out/sheng/ipados-27.0.1-24A446/sheng_ipados27
+
+jobs:
+  inspect:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: HYL0924/UniXNU-sheng
+          ref: 62feba6ea210467ff5e8bfbd0c589b2444012cca
+          path: device
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.WORK }}/tree/.cache/xnu-work
+            ${{ env.WORK }}/tree/.cache/fakeroot
+            ${{ env.WORK }}/tree/build/xnu
+            ${{ env.WORK }}/xnu-inputs.json
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Measure the actual segment capacity
+        run: |
+          git submodule update --init --depth 1 kits/XnuPrelink
+          ./unixnu defconfig sheng_ipados27_defconfig --os 27
+          python3 scripts/ci/layout.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-prelink-inputs
+          path: layout-inputs/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true

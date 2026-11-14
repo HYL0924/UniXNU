@@ -62,6 +62,16 @@ cp unixnu.example.toml unixnu.local.toml
 前一条成功后再执行下一条。[内核准备](/zh/guide/build-kernel)说明归档、ABI 和预链接要求，
 [固件集成](/zh/porting/uefi-firmware#required-integration)说明必需的 DSC/FDF 模块。
 
+为状态前缀着色，并把命令输出保存为纯文本日志：
+
+```sh
+python3 scripts/build-log.py --log out/build.log -- ./unixnu build kernel
+```
+
+蓝色表示进度，绿色表示完成，黄色表示警告，红色表示失败。包装器也识别 pip、CMake 和
+编译器诊断。终端中自动启用颜色；`NO_COLOR` 或 `--color never` 关闭颜色，
+`--color always` 在重定向输出中启用颜色。包装器返回原命令的退出码。
+
 | 步骤 | 预期输出 |
 | --- | --- |
 | 内核 | `<output>/kernel/kernel.macho` 和构建/预链接日志 |
@@ -264,6 +274,9 @@ tree/
 ### ipsw
 
 IPSW 按成员读取，远程 IPSW 不会整体下载。zip 目录和需要的成员通过 HTTP range 请求读取。解压的成员缓存在 `out/ipsw/<build>/`，并按 `board.toml [ipsw.sha256]` 的哈希校验。
+
+提取成员时最多并行预取 64 个 8 MiB 分块。通过 `UNIXNU_IPSW_JOBS` 设置 `1..64` 路并发，
+设为 `1` 关闭预取。断流分块重试成功后才写入缓存。日志显示提取进度、速度和预计剩余时间。
 
 镜像必须匹配 `[ipsw]` 的产品、版本、build、device class、chip ID 和 board ID。
 

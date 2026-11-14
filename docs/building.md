@@ -67,6 +67,17 @@ Run each command after the preceding one succeeds. [Kernel preparation](/guide/b
 explains archive/ABI requirements and prelink. [Firmware integration](/porting/uefi-firmware#required-integration)
 explains the required DSC/FDF modules.
 
+To color status prefixes and save the command's output to a plain-text log:
+
+```sh
+python3 scripts/build-log.py --log out/build.log -- ./unixnu build kernel
+```
+
+Blue marks progress, green completion, yellow warnings and red failures. The
+wrapper also recognizes pip, CMake and compiler diagnostics. Colors are enabled
+for terminals; `NO_COLOR` or `--color never` disables them. `--color always`
+enables them in redirected output. The wrapper returns the command's exit status.
+
 | Step | Expected output |
 | --- | --- |
 | Kernel | `<output>/kernel/kernel.macho` and build/prelink logs |
@@ -278,6 +289,10 @@ Modules are symbolic links to their sources. Scripts are copied. The device `pac
 ### ipsw
 
 The IPSW is read member by member. A remote IPSW is never downloaded as a whole. The zip directory and each needed member are read with HTTP range requests. Extracted members are cached in `out/ipsw/<build>/` and checked against the sha256 pins in `board.toml [ipsw.sha256]`.
+
+Member extraction prefetches up to 64 ranges of 8 MiB. Set `UNIXNU_IPSW_JOBS` to
+`1..64` to change concurrency; `1` disables prefetch. Interrupted ranges are retried
+before caching. Output shows extraction progress, speed and estimated remaining time.
 
 The image must match `[ipsw]`: product, version, build, device class, chip ID and board ID.
 

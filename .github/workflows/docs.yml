@@ -46,11 +46,14 @@ jobs:
       - run: npm run build
         working-directory: docs
       - uses: actions/configure-pages@v5
+        if: github.event.repository.fork != true
       - uses: actions/upload-pages-artifact@v3
+        if: github.event.repository.fork != true
         with:
           path: docs/.vitepress/dist
 
   deploy:
+    if: github.event.repository.fork != true
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -104,6 +104,10 @@ jobs:
             --output device/firmware/wcn7850
           python3 device/scripts/extract-files.py --device device
           python3 device/scripts/extract-files.py --device device --check
+      - name: Prepare locked Wi-Fi sources before runtime
+        run: |
+          python3 device/drivers/Ath12kWifi/tools/fetch-sources.py
+          python3 device/drivers/Ath12kWifi/tools/fetch-sources.py --check
       - name: Restore graphics compiler cache
         id: graphics-cache
         uses: actions/cache/restore@v4

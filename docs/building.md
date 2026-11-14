@@ -196,6 +196,8 @@ Wi-Fi firmware is fetched from a pinned source revision and checked against the
 device's size and SHA-256 manifest. Touch, keyboard and video firmware use the
 device's extraction manifest. These checks run before the runtime build. A
 toolchain-specific graphics compiler cache is saved even if a later step fails.
+The Wi-Fi source lock is prepared before runtime packaging. Git sources use
+their exact commits and non-cone sparse checkout for file-level patterns.
 
 After all image checks pass, the summary links three separate artifacts:
 `boot-ipados27`, `vendor-boot-ipados27` and `userdata-root-ipados27`. Download

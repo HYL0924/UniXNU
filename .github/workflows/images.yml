@@ -106,6 +106,9 @@ jobs:
           python3 device/scripts/extract-files.py --device device --check
       - name: Prepare locked Wi-Fi sources before runtime
         run: |
+          python3 scripts/ci/prepare-sources.py \
+            --lock device/drivers/Ath12kWifi/tools/source-lock.json \
+            --output device/drivers/Ath12kWifi/deps
           python3 device/drivers/Ath12kWifi/tools/fetch-sources.py
           python3 device/drivers/Ath12kWifi/tools/fetch-sources.py --check
       - name: Restore graphics compiler cache

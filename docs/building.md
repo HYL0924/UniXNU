@@ -192,6 +192,11 @@ an empty ramdisk and the stock vendor device tree. `vendor_boot.img` carries
 the FAT payload at a relocated load address and preserves the stock device
 tree, bootconfig and AVB metadata.
 
+Wi-Fi firmware is fetched from a pinned source revision and checked against the
+device's size and SHA-256 manifest. Touch, keyboard and video firmware use the
+device's extraction manifest. These checks run before the runtime build. A
+toolchain-specific graphics compiler cache is saved even if a later step fails.
+
 After all image checks pass, the summary links three separate artifacts:
 `boot-ipados27`, `vendor-boot-ipados27` and `userdata-root-ipados27`. Download
 and extract all three from the same run, then check the `SHA256SUMS` in

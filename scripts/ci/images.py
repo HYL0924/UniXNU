@@ -14,6 +14,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -101,6 +102,32 @@ def pack(ctx, stock, address):
     names = {item['name'] for item in root_report['objects']}
     if any(f'{window["name"]}.vroot' not in names for window in root_report['windows']):
         raise Error('userdata is missing a verified-root block table')
+    payload_report = json.loads((ctx.work / 'payload/payload.json').read_text())
+
+    def read_fat(name):
+        return subprocess.check_output(['mtype', '-i', str(payload), f'::EFI/UniXNU/{name}'])
+
+    if sha256_file(payload) != payload_report['payload_sha256']:
+        raise Error('payload differs from its build report')
+    for filename, key in [('kernel.macho', 'payload_kernel_sha256'), ('kernel.macho.adt', 'adt_sha256'),
+                          ('kernel.macho.trustcache', 'trust_cache_sha256'),
+                          ('kernel.macho.gpuaddon', 'gpu_addon_sha256'), ('scratch-data.img', 'data_ramdisk_sha256')]:
+        expected = payload_report.get(key)
+        if not expected or hashlib.sha256(read_fat(f'Payloads/{filename}')).hexdigest() != expected:
+            raise Error(f'FAT payload dependency missing or corrupted: {filename}')
+    config = tomllib.loads(read_fat('unixnu.toml').decode())
+    entry = next(item for item in config['entry'] if item['id'] == 'xnu')
+    if (entry['args'] != payload_report['kernel_args'] or entry['path'] != 'Payloads/kernel.macho'
+            or entry.get('initrd') != 'Payloads/scratch-data.img'):
+        raise Error('packed boot entry differs from the kernel/runtime configuration')
+    policies = read_fat('Payloads/kernel.macho.vroot')
+    if policies[:8] != b'VROOTB01' or struct.unpack_from('<Q', policies, 16)[0] != len(root_report['windows']):
+        raise Error('packed root-policy bundle does not cover the userdata windows')
+    for index, window in enumerate(root_report['windows']):
+        offset, length = struct.unpack_from('<QQ', policies, 32 + 16 * index)
+        header = policies[offset:offset + length]
+        if len(header) != 544 or header[56:88].hex() != window['sha256']:
+            raise Error(f'{window["name"]}: packed signed root policy differs from userdata')
     target = ctx.work / 'downloads'
     target.mkdir(exist_ok=True)
     manifest = {'device': ctx.name, 'os_profile': ctx.work.parent.name,

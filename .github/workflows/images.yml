@@ -80,6 +80,7 @@ jobs:
             exit 1
           fi
       - name: Install and check tools
+        id: tools
         run: |
           brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 blacktop/tap/ipsw
           {
@@ -87,11 +88,33 @@ jobs:
             echo "$(brew --prefix bison)/bin"
           } >> "$GITHUB_PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
-          for tool in git make cmake ninja dtc mformat mcopy aea compression_tool xcodebuild ipsw; do
+          for tool in git make cmake ninja dtc mformat mcopy mtype aea compression_tool xcodebuild ipsw; do
             command -v "$tool"
           done
           xcodebuild -version
+          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
           df -h .
+          python3 -m unittest discover -s scripts/unixnu -p 'test_bootimg.py'
+          python3 -m unittest discover -s scripts/unixnu -p 'test_vendor_boot.py'
+      - name: Fetch and validate runtime firmware
+        run: |
+          python3 scripts/ci/fetch-firmware.py \
+            --manifest device/firmware/wcn7850/manifest.json \
+            --base-url https://raw.githubusercontent.com/ianchb/sheng-firmware/ebdd6f89ee5aaa132f03860c211bdfb4294bd954/ath12k/WCN7850/hw2.0 \
+            --output device/firmware/wcn7850
+          python3 device/scripts/extract-files.py --device device
+          python3 device/scripts/extract-files.py --device device --check
+      - name: Restore graphics compiler cache
+        id: graphics-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.WORK }}/tree/.cache/mesa-work
+            ${{ env.WORK }}/tree/.cache/mesa-venv
+            ${{ env.WORK }}/tree/.cache/gpu-reference/metal2vulkan
+            ${{ env.WORK }}/tree/build/mesa-tu-ios27
+            ${{ env.WORK }}/tree/build/adreno-metal-bridge
+          key: macos26-gpu-v1-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py') }}
       - name: Configure and fetch pinned sources
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -112,6 +135,17 @@ jobs:
           args=()
           if [ ! -f "$WORK/runtime/data.dbr" ] && [ "$INIT_DATA" = true ]; then args+=(--init-data); fi
           ./unixnu build kernel package payload firmware --os 27 "${args[@]}"
+      - name: Save graphics compiler cache
+        if: always() && steps.graphics-cache.outcome == 'success' && steps.graphics-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/tree/build/mesa-tu-ios27/build.ninja') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK }}/tree/.cache/mesa-work
+            ${{ env.WORK }}/tree/.cache/mesa-venv
+            ${{ env.WORK }}/tree/.cache/gpu-reference/metal2vulkan
+            ${{ env.WORK }}/tree/build/mesa-tu-ios27
+            ${{ env.WORK }}/tree/build/adreno-metal-bridge
+          key: macos26-gpu-v1-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py') }}
       - uses: actions/cache/save@v4
         if: always() && steps.installation.outcome == 'success' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/runtime/data.dbr') != ''
         with:

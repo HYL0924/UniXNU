@@ -179,6 +179,10 @@ workflow 从 IPSW 的实际原始窗口生成并验证签名根策略，再编�
 vendor 设备树；`vendor_boot.img` 在调整后的加载地址携带 FAT payload，保留原厂
 设备树、bootconfig 和 AVB 元数据。
 
+Wi-Fi 固件从固定版本的来源获取，并校验设备清单中的大小和 SHA-256。触摸、键盘
+和视频固件按设备的提取清单准备。这些检查在运行组件编译前完成。图形编译缓存
+按工具链区分保存，后续步骤失败时也会保留。
+
 全部镜像检查通过后，摘要提供 `boot-ipados27`、`vendor-boot-ipados27` 和
 `userdata-root-ipados27` 三个独立产物的下载链接。请下载并解压同一次构建的三个
 产物，用 `checksums-ipados27` 中的 `SHA256SUMS` 校验。下载需要登录 GitHub，

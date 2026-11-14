@@ -184,6 +184,9 @@ Wi-Fi 固件从固定版本的来源获取，并校验设备清单中的大小�
 按工具链区分保存，后续步骤失败时也会保留。
 Wi-Fi 源码按锁定清单在运行组件打包前准备；Git 使用精确提交和 non-cone 稀疏检出，
 支持清单中的文件路径模式。
+设备 feed 与 Sm8550Platform 组件目录固定到同一份 SoC 提交，包含板级归档需要的
+GENI UART、QUP DMA 和视频操作。workflow 在编译前检查这些文件，并保留相同源码
+和工具链下的 XNU bootstrap 对象及 Rust 构建产物，供重试复用。
 
 全部镜像检查通过后，摘要提供 `boot-ipados27`、`vendor-boot-ipados27` 和
 `userdata-root-ipados27` 三个独立产物的下载链接。请下载并解压同一次构建的三个

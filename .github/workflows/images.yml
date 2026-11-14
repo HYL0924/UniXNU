@@ -38,8 +38,8 @@ jobs:
           submodules: recursive
       - uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU-sheng
-          ref: 68800685763d755c368775b848dd703fb3f8a3ce
+          repository: HYL0924/UniXNU-sheng
+          ref: 4d1861154aa1907b43680b966e604e3638f4ff09
           path: device
           submodules: recursive
           persist-credentials: false
@@ -111,6 +111,8 @@ jobs:
             --output device/drivers/Ath12kWifi/deps
           python3 device/drivers/Ath12kWifi/tools/fetch-sources.py
           python3 device/drivers/Ath12kWifi/tools/fetch-sources.py --check
+          python3 device/drivers/QcaBluetooth/tools/prepare-linux.py
+          python3 device/drivers/QcomIris/tools/fetch-sources.py
       - name: Restore graphics compiler cache
         id: graphics-cache
         uses: actions/cache/restore@v4
@@ -121,7 +123,21 @@ jobs:
             ${{ env.WORK }}/tree/.cache/gpu-reference/metal2vulkan
             ${{ env.WORK }}/tree/build/mesa-tu-ios27
             ${{ env.WORK }}/tree/build/adreno-metal-bridge
-          key: macos26-gpu-v1-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py') }}
+            ${{ env.WORK }}/tree/build/m2v-target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos26-gpu-v2-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py', 'scripts/build-adreno-metal-bridge.py') }}
+          restore-keys: |
+            macos26-gpu-v1-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py') }}
+      - name: Restore XNU bootstrap cache
+        id: xnu-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.WORK }}/tree/.cache/xnu-work
+            ${{ env.WORK }}/tree/.cache/fakeroot
+            ${{ env.WORK }}/tree/build/xnu
+          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/arm64/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
       - name: Configure and fetch pinned sources
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -129,6 +145,10 @@ jobs:
           ./unixnu defconfig sheng_ipados27_defconfig --os 27
           ./unixnu fetch --os 27
           ./unixnu tree --os 27
+          for stem in Sm8550GeniUart Sm8550QupDma Sm8550AppsSmmu Sm8550VideoCc; do
+            test -f "$WORK/tree/kits/Sm8550Platform/$stem.h"
+            test -f "$WORK/tree/kits/Sm8550Platform/$stem.c"
+          done
       - name: Build and verify userdata and root policies
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -142,6 +162,15 @@ jobs:
           args=()
           if [ ! -f "$WORK/runtime/data.dbr" ] && [ "$INIT_DATA" = true ]; then args+=(--init-data); fi
           ./unixnu build kernel package payload firmware --os 27 "${args[@]}"
+      - name: Save XNU bootstrap cache
+        if: always() && steps.xnu-cache.outcome == 'success' && steps.xnu-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK }}/tree/.cache/xnu-work
+            ${{ env.WORK }}/tree/.cache/fakeroot
+            ${{ env.WORK }}/tree/build/xnu
+          key: macos26-xnu-v1-${{ steps.tools.outputs.xcode }}-${{ steps.installation.outputs.cache }}-${{ hashFiles('profiles/arch/arm64/**', 'profiles/os/ipados-27.0.1-24A446/**', 'patches/xnu-12377/**', 'device/configs/sheng_ipados27_defconfig', 'device/patches/xnu-12377/**', 'device/feeds.toml', 'scripts/build-xnu-4k-baseline.sh', 'scripts/prepare-xnu-source.py') }}
       - name: Save graphics compiler cache
         if: always() && steps.graphics-cache.outcome == 'success' && steps.graphics-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/tree/build/mesa-tu-ios27/build.ninja') != ''
         uses: actions/cache/save@v4
@@ -152,7 +181,10 @@ jobs:
             ${{ env.WORK }}/tree/.cache/gpu-reference/metal2vulkan
             ${{ env.WORK }}/tree/build/mesa-tu-ios27
             ${{ env.WORK }}/tree/build/adreno-metal-bridge
-          key: macos26-gpu-v1-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py') }}
+            ${{ env.WORK }}/tree/build/m2v-target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos26-gpu-v2-${{ steps.tools.outputs.xcode }}-${{ hashFiles('scripts/data/adreno-compiler-inputs.json', 'scripts/data/gpu-metal-vulkan-inputs.json', 'patches/mesa/**', 'scripts/build-turnip-darwin.py', 'scripts/build-adreno-metal-plugin.py', 'scripts/build-adreno-metal-bridge.py') }}
       - uses: actions/cache/save@v4
         if: always() && steps.installation.outcome == 'success' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('out/sheng/*/*/runtime/data.dbr') != ''
         with:

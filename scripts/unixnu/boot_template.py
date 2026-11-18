@@ -69,6 +69,37 @@ def fv_files(data, offset=0):
     return header, length, files
 
 
+def decompress_firmware_section(packed):
+    if len(packed) < 13:
+        raise Error('truncated LZMA firmware header')
+    size = int.from_bytes(packed[5:13], 'little')
+    unknown = (1 << 64) - 1
+    if size != unknown and size > MAX_FV:
+        raise Error('compressed firmware volume exceeds bounds')
+
+    def decode(data):
+        decoder = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE, memlimit=MAX_FV * 2)
+        expanded = decoder.decompress(data, max_length=MAX_FV + 1)
+        if len(expanded) > MAX_FV or not decoder.eof or decoder.unused_data:
+            raise Error('compressed firmware volume exceeds bounds or has trailing data')
+        return expanded
+
+    try:
+        try:
+            expanded = decode(packed)
+        except lzma.LZMAError:
+            if size == unknown:
+                raise
+            # Older liblzma rejects a known size combined with an end marker.
+            # Let it verify the marker, then verify the original size ourselves.
+            expanded = decode(packed[:5] + b'\xff' * 8 + packed[13:])
+    except lzma.LZMAError as error:
+        raise Error(f'invalid compressed firmware volume: {error}') from error
+    if size != unknown and len(expanded) != size:
+        raise Error('compressed firmware volume size mismatch')
+    return expanded
+
+
 def compressed_volume(firmware):
     _, _, root = fv_files(firmware)
     found = []
@@ -81,13 +112,7 @@ def compressed_volume(firmware):
             data_at = struct.unpack_from('<H', section, 20)[0]
             if data_at != 24:
                 raise Error('unsupported compressed firmware section header')
-            try:
-                decoder = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE, memlimit=MAX_FV * 2)
-                expanded = decoder.decompress(section[data_at:], max_length=MAX_FV + 1)
-            except lzma.LZMAError as error:
-                raise Error(f'invalid compressed firmware volume: {error}') from error
-            if len(expanded) > MAX_FV or not decoder.eof or decoder.unused_data:
-                raise Error('compressed firmware volume exceeds bounds or has trailing data')
+            expanded = decompress_firmware_section(section[data_at:])
             volumes = [(at, content) for at, kind, content in sections(expanded, 0, len(expanded)) if kind == 0x17]
             if len(volumes) != 1 or volumes[0][0] != 4 or expanded[:4] != b'\x04\0\0\x19':
                 raise Error('unsupported nested firmware volume layout')

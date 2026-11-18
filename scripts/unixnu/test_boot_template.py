@@ -152,6 +152,16 @@ class BootTemplate(unittest.TestCase):
         self.assertEqual(image['os_version'], '17.0.0')
         self.assertEqual(image['os_patch_level'], '2026-08-01')
 
+    def test_sized_lzma_with_end_marker(self):
+        body = b'firmware' * 100
+        packed = lzma.compress(body, format=lzma.FORMAT_ALONE)
+        sized = packed[:5] + len(body).to_bytes(8, 'little') + packed[13:]
+        self.assertEqual(template.decompress_firmware_section(sized), body)
+        for malformed in (sized + b'junk', sized[:-3],
+                          packed[:5] + (len(body) + 1).to_bytes(8, 'little') + packed[13:]):
+            with self.subTest(size=len(malformed)), self.assertRaises(Error):
+                template.decompress_firmware_section(malformed)
+
     def test_corrupt_firmware_checksum_is_rejected(self):
         data = bytearray(firmware())
         data[44] ^= 1

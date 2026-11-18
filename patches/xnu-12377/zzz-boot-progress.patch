@@ -79,7 +79,7 @@ index 0daa1a2e..b823dc0d 100644
  	uint32_t i;
  	int error;
  	vm_map_t map = current_map();
-@@ -9113,12 +9117,23 @@ load_init_program(proc_t p)
+@@ -9113,12 +9117,28 @@ load_init_program(proc_t p)
  	    VM_MAP_KERNEL_FLAGS_ANYWHERE());
  	user_addr_t init_envp = USER_ADDR_NULL;
  #if defined(XNU_OWNER_CACHE_MOUNT) && XNU_OWNER_CACHE_MOUNT
@@ -90,7 +90,12 @@ index 0daa1a2e..b823dc0d 100644
  #endif
  #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
 +	boot_progress_stage("Data mount enter");
++#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
++	(void)native_owner_data_prepare;
++	int data_error = native_owner_macos_data_prepare(p, (user_addr_t)scratch_addr);
++#else
  	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
++#endif
 +	boot_progress_stage("Data mount returned");
  	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
 +#if defined(XNU_BOOT_PROGRESS) && XNU_BOOT_PROGRESS
@@ -103,7 +108,7 @@ index 0daa1a2e..b823dc0d 100644
  #endif
  #if CONFIG_MEMORYSTATUS
  	(void) memorystatus_init_at_boot_snapshot();
-@@ -9647,6 +9662,7 @@ process_signature(proc_t p, struct image_params *imgp)
+@@ -9647,6 +9667,7 @@ process_signature(proc_t p, struct image_params *imgp)
  	 * approve of exec, kill and return immediately.
  	 */
  	if (imgp->ip_mac_return != 0) {
@@ -111,7 +116,7 @@ index 0daa1a2e..b823dc0d 100644
  		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXITREASON_CREATE) | DBG_FUNC_NONE,
  		    proc_getpid(p), OS_REASON_EXEC, EXEC_EXIT_REASON_SECURITY_POLICY, 0, 0);
  		signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_SECURITY_POLICY);
-@@ -9823,7 +9839,9 @@ done:
+@@ -9823,7 +9844,9 @@ done:
  		 * state.
  		 */
  

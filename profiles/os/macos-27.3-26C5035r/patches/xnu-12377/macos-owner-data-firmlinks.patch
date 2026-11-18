@@ -224,19 +224,6 @@ index 20cda24..095a12b 100644
  static int
  load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path, user_addr_t envp)
  {
-@@ -9126,7 +9330,12 @@ load_init_program(proc_t p)
- #endif
- #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
- 	boot_progress_stage("Data mount enter");
-+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
-+	(void)native_owner_data_prepare;
-+	int data_error = native_owner_macos_data_prepare(p, (user_addr_t)scratch_addr);
-+#else
- 	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
-+#endif
- 	boot_progress_stage("Data mount returned");
- 	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
- #if defined(XNU_BOOT_PROGRESS) && XNU_BOOT_PROGRESS
 diff --git a/bsd/vfs/vfs_lookup.c b/bsd/vfs/vfs_lookup.c
 index b8cf563..9ab1385 100644
 --- a/bsd/vfs/vfs_lookup.c

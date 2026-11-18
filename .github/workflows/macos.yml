@@ -33,6 +33,10 @@ on:
         description: Mu-Silicium UEFI ref (used for kernel image)
         required: true
         default: sheng
+      image_recipient:
+        description: Base64 DER recipient certificate for encrypted boot.img delivery (kernel image only)
+        required: false
+        default: ""
       xcode:
         description: Xcode version of the macos-26 image (/Applications/Xcode_<version>.app)
         required: true
@@ -159,6 +163,11 @@ jobs:
           [ -f device/board.toml ] || fail "the device repository has no board.toml"
           [ -f "device/configs/$DEFCONFIG" ] || fail "device/configs/$DEFCONFIG not found: $(cd device/configs 2>/dev/null && printf '%s ' *_defconfig)"
           [ -d "$DEVELOPER_DIR" ] || fail "Xcode not found at $DEVELOPER_DIR; installed: $(printf '%s ' /Applications/Xcode_*.app)"
+          trust_cache_url=$(jq -r '.inputs.trust_cache_url // ""' "$GITHUB_EVENT_PATH")
+          data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
+          if [[ "$STEPS" == *image* ]]; then
+            jq -er '.inputs.image_recipient | select(length > 0)' "$GITHUB_EVENT_PATH" | base64 -D | openssl x509 -inform der -out "$RUNNER_TEMP/recipient.pem" || fail "kernel image needs a valid recipient certificate"
+          fi
           if [ -n "$GROW_GIB" ] && ! [[ "$GROW_GIB" =~ ^[0-9]+$ ]]; then fail "grow_gib must be a whole number of GiB"; fi
           if [ -n "$GROW_GIB" ] && [ -z "$data_seed_url" ]; then fail "grow_gib needs data_seed_url"; fi
           if [ "$SKIP_SETUP" = true ] && [ -z "$data_seed_url" ]; then fail "skip_setup needs data_seed_url"; fi
@@ -268,6 +277,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./unixnu build --os "$BUILD_OS_PROFILE" kernel
 
+      - name: Measure fileset code space after a failed kernel build
+        if: failure() && steps.kernel.outcome == 'failure'
+        run: |
+          PYTHONPATH=scripts python3 scripts/fileset-space.py "$BUILD_OS_PROFILE"
+
       - name: Build userdata
         id: userdata
         if: contains(inputs.steps, 'userdata')
@@ -299,17 +313,25 @@ jobs:
         id: image
         if: contains(inputs.steps, 'image')
         env:
+          WORK: ${{ steps.check.outputs.work }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
           ./unixnu build --os "$BUILD_OS_PROFILE" package firmware
           ./unixnu bootimg --os "$BUILD_OS_PROFILE" --ramdisk none
+          cd "$WORK/boot"
+          test -s boot.img
+          shasum -a 256 boot.img > "$RUNNER_TEMP/boot.img.sha256"
+          openssl cms -encrypt -binary -aes-256-cbc -in boot.img -outform DER -out "$RUNNER_TEMP/boot.img.cms" "$RUNNER_TEMP/recipient.pem"
 
       - name: Upload boot image
         if: steps.image.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unixnu-${{ steps.check.outputs.board }}-boot-image-${{ github.run_attempt }}
-          path: ${{ steps.check.outputs.work }}/boot/boot.img
+          path: |
+            ${{ runner.temp }}/boot.img.cms
+            ${{ runner.temp }}/boot.img.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -333,7 +355,7 @@ jobs:
           event = Path(os.environ['GITHUB_EVENT_PATH']).read_text()
           import json
           inputs = json.loads(event).get('inputs', {})
-          secrets = [os.environ.get('UNIXNU_UNIQUE_CHIP_ID', ''), inputs.get('trust_cache_url', ''), inputs.get('data_seed_url', '')]
+          secrets = [os.environ.get('UNIXNU_UNIQUE_CHIP_ID', ''), *(inputs.get(key, '') for key in ('ipsw_url', 'trust_cache_url', 'data_seed_url'))]
           secrets = [value for value in secrets if value]
           count = 0
           for path in sorted(source.glob('*.log')) if source.is_dir() else []:

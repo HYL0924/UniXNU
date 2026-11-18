@@ -16,14 +16,23 @@ on:
         required: true
         default: sheng_ipados27_defconfig
       steps:
-        description: Steps to build (nothing is uploaded except text logs; userdata needs about 16 GB of disk)
+        description: Build the kernel, optionally a boot image (boot.img artifact), userdata or payload
         type: choice
         options:
           - kernel
           - kernel payload
           - kernel userdata
           - kernel userdata payload
+          - kernel image
         default: kernel
+      uefi_repository:
+        description: Mu-Silicium UEFI repository (used for kernel image)
+        required: true
+        default: UniXNU/uefi-sheng
+      uefi_ref:
+        description: Mu-Silicium UEFI ref (used for kernel image)
+        required: true
+        default: sheng
       xcode:
         description: Xcode version of the macos-26 image (/Applications/Xcode_<version>.app)
         required: true
@@ -84,7 +93,6 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode }}.app/Contents/Developer
       UNIXNU_DEVICE: ${{ github.workspace }}/device
-      UNIXNU_IPSW: ${{ inputs.ipsw_url }}
       DEFCONFIG: ${{ inputs.defconfig }}
       STEPS: ${{ inputs.steps }}
     steps:
@@ -100,6 +108,37 @@ jobs:
           ref: ${{ inputs.device_ref }}
           path: device
           token: ${{ secrets.UNIXNU_DEVICE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Check out UEFI
+        if: contains(inputs.steps, 'image')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.uefi_repository }}
+          ref: ${{ inputs.uefi_ref }}
+          path: uefi
+          persist-credentials: false
+
+      - name: Configure UEFI path
+        if: contains(inputs.steps, 'image')
+        run: echo "UNIXNU_UEFI=$GITHUB_WORKSPACE/uefi" >> "$GITHUB_ENV"
+
+      - name: Mask download URLs
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          inputs = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()).get('inputs', {})
+          for name in ('ipsw_url', 'trust_cache_url', 'data_seed_url'):
+              value = inputs.get(name, '')
+              if '\n' in value or '\r' in value:
+                  sys.exit(f'::error::{name} must be a single-line URL')
+              if value:
+                  print(f'::add-mask::{value}')
+              if name == 'ipsw_url':
+                  with open(os.environ['GITHUB_ENV'], 'a') as env:
+                      env.write(f'UNIXNU_IPSW={value}\n')
+          PY
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -116,10 +155,6 @@ jobs:
           python3 scripts/unixnu/test_boot_template.py
           # The URLs can carry access tokens and the logs of a public repository are public: read them from the
           # event payload, never from step environments, and mask them before any later step prints its env.
-          trust_cache_url=$(jq -r '.inputs.trust_cache_url // ""' "$GITHUB_EVENT_PATH")
-          data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
-          if [ -n "$trust_cache_url" ]; then echo "::add-mask::$trust_cache_url"; fi
-          if [ -n "$data_seed_url" ]; then echo "::add-mask::$data_seed_url"; fi
           fail() { echo "::error::$1"; exit 1; }
           [ -f device/board.toml ] || fail "the device repository has no board.toml"
           [ -f "device/configs/$DEFCONFIG" ] || fail "device/configs/$DEFCONFIG not found: $(cd device/configs 2>/dev/null && printf '%s ' *_defconfig)"
@@ -143,7 +178,9 @@ jobs:
           matches = [profile for profile, name in raw.get('package', {}).get('defconfig', {}).items() if name == config]
           if len(matches) > 1:
               sys.exit(f'::error::{config} maps to multiple OS profiles: {matches}')
-          profile = matches[0] if matches else ''
+          profile = matches[0] if matches else raw.get('board', {}).get('os_profile', '')
+          if not profile:
+              sys.exit('::error::could not determine the OS profile for this defconfig')
           ctx = Context(parser().parse_args(['defconfig', '--os', profile, config]))
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               print(f'BUILD_OS_PROFILE={profile}', file=env)
@@ -254,6 +291,24 @@ jobs:
           if [ "$SKIP_SETUP" = true ]; then args+=(--skip-setup); fi
           ./unixnu build --os "$BUILD_OS_PROFILE" payload "${args[@]}"
 
+      - name: Build boot image
+        id: image
+        if: contains(inputs.steps, 'image')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./unixnu build --os "$BUILD_OS_PROFILE" package firmware
+          ./unixnu bootimg --os "$BUILD_OS_PROFILE" --ramdisk none
+
+      - name: Upload boot image
+        if: steps.image.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unixnu-${{ steps.check.outputs.board }}-boot-image-${{ github.run_attempt }}
+          path: ${{ steps.check.outputs.work }}/boot/boot.img
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Collect the text logs
         id: logs
         if: always() && steps.check.outcome == 'success'
@@ -262,8 +317,8 @@ jobs:
           BOARD: ${{ steps.check.outputs.board }}
           WORK: ${{ steps.check.outputs.work }}
         run: |
-          # Only *.log files are copied, with the secrets and the input URLs replaced. Kernels, payloads, disk images,
-          # kernelcaches and IPSW members are never uploaded: they derive from Apple software.
+          # Logs are redacted before upload. Binary firmware inputs and images are excluded here; boot.img has a separate,
+          # explicit upload step for image runs.
           python3 - <<'PY'
           import os, re, shutil
           from pathlib import Path
@@ -306,6 +361,7 @@ jobs:
           KERNEL: ${{ steps.kernel.outcome }}
           USERDATA: ${{ steps.userdata.outcome }}
           PAYLOAD: ${{ steps.payload.outcome }}
+          IMAGE: ${{ steps.image.outcome }}
         run: |
           {
             echo "## macOS build: ${BOARD:-unknown} (${DEFCONFIG}, ${STEPS})"
@@ -315,8 +371,9 @@ jobs:
             echo "| kernel | ${KERNEL:-skipped} |"
             echo "| userdata | ${USERDATA:-skipped} |"
             echo "| payload | ${PAYLOAD:-skipped} |"
+            echo "| boot image | ${IMAGE:-skipped} |"
             echo
-            echo "This workflow only checks that the build works. It publishes text logs (7 days) and no images."
+            echo "Text logs are retained for 7 days. A requested boot image is retained as a separate artifact for 7 days."
             xcodebuild -version | sed -n '1p'
           } >> "$GITHUB_STEP_SUMMARY"
 

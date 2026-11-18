@@ -145,9 +145,9 @@ def main():
             '-I', str(ROOT / 'kits/VerifiedRoot/include'), '-I', str(ROOT / 'drivers/VirtioMmioBlock')])],
         'ShengHidInput': [(device / 'drivers/ShengHidInput/NativeHidInput.cpp', ['-DNATIVE_HID_SOURCE_API=1'])],
         'ShengInputTransport': [(device / 'package/TouchProbe.cpp', [
-            '-I', str(ROOT / 'drivers/QcomGeniSpi'), '-I', str(device / 'drivers/ShengNovatekTouch')]),
+            '-I', str(tree / 'drivers/QcomGeniSpi'), '-I', str(device / 'drivers/ShengNovatekTouch')]),
             (device / 'package/ButtonProbe.cpp', []),
-            (ROOT / 'drivers/QcomGeniSpi/GeniSpi.c', []),
+            (tree / 'drivers/QcomGeniSpi/GeniSpi.c', []),
             (device / 'drivers/ShengNovatekTouch/NvtProtocol.c', []),
             (device / 'drivers/ShengNovatekTouch/NvtTouchCore.c', []),
             (firmware_source, [])],

@@ -256,6 +256,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash -euo pipefail -c "$PRE_BUILD"
 
+      - name: Extract pinned keyboard firmware
+        if: hashFiles('device/proprietary-files.txt') != '' && hashFiles('device/scripts/extract-files.py') != ''
+        run: python3 device/scripts/extract-files.py --section Keyboard --device device
+
       - name: Build kernel
         id: kernel
         env:

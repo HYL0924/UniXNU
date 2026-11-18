@@ -14,7 +14,7 @@ on:
       defconfig:
         description: Defconfig name (configs/ of the device repository)
         required: true
-        default: sheng_defconfig
+        default: sheng_ipados27_defconfig
       steps:
         description: Steps to build (nothing is uploaded except text logs; userdata needs about 16 GB of disk)
         type: choice

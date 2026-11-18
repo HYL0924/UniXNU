@@ -136,7 +136,17 @@ jobs:
           sys.path.insert(0, 'scripts')
           from unixnu.cli import parser, cmd_defconfig
           from unixnu.config import Context
-          ctx = Context(parser().parse_args(['defconfig', os.environ['DEFCONFIG']]))
+          from pathlib import Path
+          from unixnu.config import load_toml
+          raw = load_toml(Path('device/board.toml'))
+          config = os.environ['DEFCONFIG']
+          matches = [profile for profile, name in raw.get('package', {}).get('defconfig', {}).items() if name == config]
+          if len(matches) > 1:
+              sys.exit(f'::error::{config} maps to multiple OS profiles: {matches}')
+          profile = matches[0] if matches else ''
+          ctx = Context(parser().parse_args(['defconfig', '--os', profile, config]))
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              print(f'BUILD_OS_PROFILE={profile}', file=env)
           cmd_defconfig(ctx)
           board = ctx.board
           name = board.get('board', {}).get('name')
@@ -168,8 +178,8 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk iphoneos --find mig
-          clang --version | head -n 1
-          "$(brew --prefix llvm)/bin/clang" --version | head -n 1
+          clang --version | sed -n '1p'
+          "$(brew --prefix llvm)/bin/clang" --version | sed -n '1p'
           python3 --version
           missing=0
           for tool in git make clang cmake ninja unifdef ld.lld mformat mcopy dtc xcodebuild; do
@@ -215,13 +225,13 @@ jobs:
           # prepare-xnu-source.py lists Apple sources through the GitHub API; anonymous calls from hosted runners hit
           # the shared rate limit (HTTP 403).
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./unixnu build kernel
+        run: ./unixnu build --os "$BUILD_OS_PROFILE" kernel
 
       - name: Build userdata
         id: userdata
         if: contains(inputs.steps, 'userdata')
         run: |
-          ./unixnu build userdata
+          ./unixnu build --os "$BUILD_OS_PROFILE" userdata
           df -h "$GITHUB_WORKSPACE"
 
       - name: Build payload
@@ -242,7 +252,7 @@ jobs:
           fi
           if [ -f "$RUNNER_TEMP/data.dbr" ]; then args+=(--data-ramdisk "$RUNNER_TEMP/data.dbr"); fi
           if [ "$SKIP_SETUP" = true ]; then args+=(--skip-setup); fi
-          ./unixnu build payload "${args[@]}"
+          ./unixnu build --os "$BUILD_OS_PROFILE" payload "${args[@]}"
 
       - name: Collect the text logs
         id: logs
@@ -307,7 +317,7 @@ jobs:
             echo "| payload | ${PAYLOAD:-skipped} |"
             echo
             echo "This workflow only checks that the build works. It publishes text logs (7 days) and no images."
-            xcodebuild -version | head -n 1
+            xcodebuild -version | sed -n '1p'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove proprietary inputs

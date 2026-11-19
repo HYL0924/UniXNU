@@ -312,9 +312,15 @@ jobs:
           test -s "${WORK}/userdata/userdata-root.img"
           df -h "$GITHUB_WORKSPACE"
 
-      - name: Extract pinned keyboard firmware
+      - name: Extract pinned device firmware
         if: hashFiles('device/proprietary-files.txt') != '' && hashFiles('device/scripts/extract-files.py') != ''
-        run: python3 device/scripts/extract-files.py --section Keyboard --device device
+        run: |
+          args=(--device device)
+          if [[ "$DEFCONFIG" != sheng_ipados27_defconfig || "$STEPS" != *payload* ]]; then
+            args+=(--section Keyboard)
+          fi
+          python3 device/scripts/extract-files.py "${args[@]}"
+          python3 device/scripts/extract-files.py "${args[@]}" --check
 
       - name: Build kernel
         id: kernel

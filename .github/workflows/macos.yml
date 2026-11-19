@@ -23,7 +23,7 @@ on:
           - kernel payload
           - kernel userdata
           - kernel userdata payload
-          - kernel image
+          - kernel userdata payload image
         default: kernel
       uefi_repository:
         description: Mu-Silicium UEFI repository (used for kernel image)
@@ -61,6 +61,10 @@ on:
         description: Data seed URL (optional; masked in the logs)
         required: false
         default: ""
+      init_data:
+        description: Generate a new Data seed for a first installation (payload only)
+        type: boolean
+        default: false
       grow_gib:
         description: Grow the Data seed to this many GiB (optional)
         required: false
@@ -151,6 +155,7 @@ jobs:
       - name: Check the inputs
         id: check
         env:
+          INIT_DATA: ${{ inputs.init_data }}
           HAS_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID != '' }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
           GROW_GIB: ${{ inputs.grow_gib }}
@@ -167,6 +172,9 @@ jobs:
           data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
           if [[ "$STEPS" == *image* ]]; then
             jq -er '.inputs.image_recipient | select(length > 0)' "$GITHUB_EVENT_PATH" | base64 -D | openssl x509 -inform der -out "$RUNNER_TEMP/recipient.pem" || fail "kernel image needs a valid recipient certificate"
+          fi
+          if [ "$INIT_DATA" = true ] && { [[ "$STEPS" != *payload* ]] || [ -n "$data_seed_url" ]; }; then
+            fail "init_data requires a payload build without a preserved Data seed"
           fi
           if [ -n "$GROW_GIB" ] && ! [[ "$GROW_GIB" =~ ^[0-9]+$ ]]; then fail "grow_gib must be a whole number of GiB"; fi
           if [ -n "$GROW_GIB" ] && [ -z "$data_seed_url" ]; then fail "grow_gib needs data_seed_url"; fi
@@ -275,7 +283,15 @@ jobs:
           # prepare-xnu-source.py lists Apple sources through the GitHub API; anonymous calls from hosted runners hit
           # the shared rate limit (HTTP 403).
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./unixnu build --os "$BUILD_OS_PROFILE" kernel
+          INIT_DATA: ${{ inputs.init_data }}
+        run: |
+          args=(kernel)
+          if [ "$INIT_DATA" = true ]; then
+            args+=(runtime --init-data)
+          elif [ -f "$RUNNER_TEMP/data.dbr" ]; then
+            args+=(--data-ramdisk "$RUNNER_TEMP/data.dbr")
+          fi
+          ./unixnu build --os "$BUILD_OS_PROFILE" "${args[@]}"
 
       - name: Measure fileset code space after a failed kernel build
         if: failure() && steps.kernel.outcome == 'failure'
@@ -286,8 +302,11 @@ jobs:
       - name: Build userdata
         id: userdata
         if: contains(inputs.steps, 'userdata')
+        env:
+          WORK: ${{ steps.check.outputs.work }}
         run: |
           ./unixnu build --os "$BUILD_OS_PROFILE" userdata
+          test -s "${WORK}/userdata/userdata-root.img"
           df -h "$GITHUB_WORKSPACE"
 
       - name: Build payload
@@ -298,6 +317,7 @@ jobs:
           SKIP_SETUP: ${{ inputs.skip_setup }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
         run: |
+          export PATH="$(brew --prefix lld)/bin:$PATH"
           args=()
           if [ -f "$RUNNER_TEMP/trustcache" ]; then
             if [ "$OWNER_TRUST_CACHE" = true ]; then
@@ -312,15 +332,16 @@ jobs:
 
       - name: Build boot image
         id: image
-        # This UEFI image has an empty ramdisk. Its build is independent of the XNU prelink.
-        if: "!cancelled() && contains(inputs.steps, 'image') && (steps.kernel.outcome == 'success' || steps.kernel.outcome == 'failure')"
+        if: contains(inputs.steps, 'image')
         env:
           WORK: ${{ steps.check.outputs.work }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
           ./unixnu build --os "$BUILD_OS_PROFILE" package firmware
-          ./unixnu bootimg --os "$BUILD_OS_PROFILE" --ramdisk none
+          test -s "$WORK/userdata/userdata-root.img"
+          test -s "$WORK/payload/payload.img"
+          ./unixnu bootimg --os "$BUILD_OS_PROFILE" --ramdisk "$WORK/payload/payload.img"
           cd "$WORK/boot"
           test -s boot.img
           shasum -a 256 boot.img > "$RUNNER_TEMP/boot.img.sha256"

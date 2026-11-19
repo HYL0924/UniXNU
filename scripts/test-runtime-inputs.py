@@ -130,8 +130,11 @@ class RuntimeInputs(unittest.TestCase):
         check_prelink_regressions(record, policy)
         worse = copy.deepcopy(record)
         worse['stubbed']['owner']['0x1200'] = 1
-        with self.assertRaisesRegex(Error, 'prelink regression'):
+        worse['missing'] = {'another': {'0x1300': 1}}
+        with self.assertRaisesRegex(Error, 'prelink regression') as error:
             check_prelink_regressions(worse, policy)
+        self.assertIn('missing another original 0x1200', str(error.exception))
+        self.assertIn('stubbed owner original 0x1100', str(error.exception))
         record['stubbed'] = {}
         check_prelink_regressions(record, policy)
         record['native_original_branches'] = []

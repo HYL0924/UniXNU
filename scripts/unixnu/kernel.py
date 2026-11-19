@@ -297,8 +297,8 @@ def stage_native(kernel, output):
     return output
 
 
-def check_prelink_regressions(record, policy):
-    """An experimental allow-missing build may improve, but cannot add gaps."""
+def prelink_gaps(record, policy):
+    """Yield every new or expanded gap in original collection coordinates."""
     slide = int(record['collection_slide'], 16)
     for kind in ('missing', 'stubbed'):
         for owner, targets in record[kind].items():
@@ -306,10 +306,17 @@ def check_prelink_regressions(record, policy):
                 original = hex((int(target, 16) - slide) & ((1 << 64) - 1))
                 allowed = policy[kind].get(owner, {}).get(original, 0)
                 if count > allowed:
-                    raise Error(f'prelink regression: {kind} {owner} original {original}, {count} sites (allowed {allowed})')
+                    yield kind, owner, original, count, allowed
+
+
+def check_prelink_regressions(record, policy):
+    problems = [f'prelink regression: {kind} {owner} original {original}, {count} sites (allowed {allowed})'
+                for kind, owner, original, count, allowed in prelink_gaps(record, policy)]
     branches = {entry['symbol'] for entry in record.get('native_original_branches', [])}
     if set(policy.get('required_original_branches', [])) - branches:
-        raise Error('prelink lacks required absolute adapter branch relocations')
+        problems.append('prelink lacks required absolute adapter branch relocations')
+    if problems:
+        raise Error('\n'.join(problems))
 
 
 def prelink(ctx):
@@ -345,6 +352,15 @@ def prelink(ctx):
     # A failed rebuild must not remove the last candidate or its record.
     with tempfile.TemporaryDirectory(dir=output.parent, prefix='.prelink-') as directory:
         candidate = Path(directory) / output.name
+        if spec.get('reviewed_symbols'):
+            # XnuPrelink includes adjacent fixtures in its matcher cache signature.
+            # Stage a private copy so concurrent profiles never modify a shared checkout.
+            source_tool = ctx.tree / spec['tool']
+            tool_dir = Path(directory) / 'XnuPrelink'
+            shutil.copytree(source_tool.parent, tool_dir, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+            fixture = ctx.tree / spec['reviewed_symbols']
+            shutil.copyfile(fixture, tool_dir / 'fixtures' / fixture.name)
+            command[1] = tool_dir / source_tool.name
         saved_map = output.with_suffix('.map.json')
         candidate_map = candidate.with_suffix('.map.json')
         if saved_map.is_file():

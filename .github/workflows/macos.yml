@@ -14,16 +14,29 @@ on:
       defconfig:
         description: Defconfig name (configs/ of the device repository)
         required: true
-        default: sheng_defconfig
+        default: sheng_ipados27_defconfig
       steps:
-        description: Steps to build (nothing is uploaded except text logs; userdata needs about 16 GB of disk)
+        description: Build the kernel, optionally userdata and payload, or deliver both boot and userdata images
         type: choice
         options:
           - kernel
           - kernel payload
           - kernel userdata
           - kernel userdata payload
+          - kernel userdata payload image
         default: kernel
+      uefi_repository:
+        description: Mu-Silicium UEFI repository (used for kernel image)
+        required: true
+        default: UniXNU/uefi-sheng
+      uefi_ref:
+        description: Mu-Silicium UEFI ref (used for kernel image)
+        required: true
+        default: sheng
+      image_recipient:
+        description: Base64 DER recipient certificate for encrypted boot and userdata image delivery
+        required: false
+        default: ""
       xcode:
         description: Xcode version of the macos-26 image (/Applications/Xcode_<version>.app)
         required: true
@@ -48,6 +61,10 @@ on:
         description: Data seed URL (optional; masked in the logs)
         required: false
         default: ""
+      init_data:
+        description: Generate a new Data seed for a first installation (payload only)
+        type: boolean
+        default: false
       grow_gib:
         description: Grow the Data seed to this many GiB (optional)
         required: false
@@ -67,6 +84,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  UNIXNU_IPSW_JOBS: 8
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
   HOMEBREW_NO_ENV_HINTS: 1
@@ -84,7 +102,6 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode }}.app/Contents/Developer
       UNIXNU_DEVICE: ${{ github.workspace }}/device
-      UNIXNU_IPSW: ${{ inputs.ipsw_url }}
       DEFCONFIG: ${{ inputs.defconfig }}
       STEPS: ${{ inputs.steps }}
     steps:
@@ -100,6 +117,37 @@ jobs:
           ref: ${{ inputs.device_ref }}
           path: device
           token: ${{ secrets.UNIXNU_DEVICE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Check out UEFI
+        if: contains(inputs.steps, 'image')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.uefi_repository }}
+          ref: ${{ inputs.uefi_ref }}
+          path: uefi
+          persist-credentials: false
+
+      - name: Configure UEFI path
+        if: contains(inputs.steps, 'image')
+        run: echo "UNIXNU_UEFI=$GITHUB_WORKSPACE/uefi" >> "$GITHUB_ENV"
+
+      - name: Mask download URLs
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          inputs = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()).get('inputs', {})
+          for name in ('ipsw_url', 'trust_cache_url', 'data_seed_url'):
+              value = inputs.get(name, '')
+              if '\n' in value or '\r' in value:
+                  sys.exit(f'::error::{name} must be a single-line URL')
+              if value:
+                  print(f'::add-mask::{value}')
+              if name == 'ipsw_url':
+                  with open(os.environ['GITHUB_ENV'], 'a') as env:
+                      env.write(f'UNIXNU_IPSW={value}\n')
+          PY
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -108,6 +156,7 @@ jobs:
       - name: Check the inputs
         id: check
         env:
+          INIT_DATA: ${{ inputs.init_data }}
           HAS_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID != '' }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
           GROW_GIB: ${{ inputs.grow_gib }}
@@ -116,14 +165,18 @@ jobs:
           python3 scripts/unixnu/test_boot_template.py
           # The URLs can carry access tokens and the logs of a public repository are public: read them from the
           # event payload, never from step environments, and mask them before any later step prints its env.
-          trust_cache_url=$(jq -r '.inputs.trust_cache_url // ""' "$GITHUB_EVENT_PATH")
-          data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
-          if [ -n "$trust_cache_url" ]; then echo "::add-mask::$trust_cache_url"; fi
-          if [ -n "$data_seed_url" ]; then echo "::add-mask::$data_seed_url"; fi
           fail() { echo "::error::$1"; exit 1; }
           [ -f device/board.toml ] || fail "the device repository has no board.toml"
           [ -f "device/configs/$DEFCONFIG" ] || fail "device/configs/$DEFCONFIG not found: $(cd device/configs 2>/dev/null && printf '%s ' *_defconfig)"
           [ -d "$DEVELOPER_DIR" ] || fail "Xcode not found at $DEVELOPER_DIR; installed: $(printf '%s ' /Applications/Xcode_*.app)"
+          trust_cache_url=$(jq -r '.inputs.trust_cache_url // ""' "$GITHUB_EVENT_PATH")
+          data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
+          if [[ "$STEPS" == *image* ]]; then
+            jq -er '.inputs.image_recipient | select(length > 0)' "$GITHUB_EVENT_PATH" | base64 -D | openssl x509 -inform der -out "$RUNNER_TEMP/recipient.pem" || fail "kernel image needs a valid recipient certificate"
+          fi
+          if [ "$INIT_DATA" = true ] && { [[ "$STEPS" != *payload* ]] || [ -n "$data_seed_url" ]; }; then
+            fail "init_data requires a payload build without a preserved Data seed"
+          fi
           if [ -n "$GROW_GIB" ] && ! [[ "$GROW_GIB" =~ ^[0-9]+$ ]]; then fail "grow_gib must be a whole number of GiB"; fi
           if [ -n "$GROW_GIB" ] && [ -z "$data_seed_url" ]; then fail "grow_gib needs data_seed_url"; fi
           if [ "$SKIP_SETUP" = true ] && [ -z "$data_seed_url" ]; then fail "skip_setup needs data_seed_url"; fi
@@ -136,7 +189,19 @@ jobs:
           sys.path.insert(0, 'scripts')
           from unixnu.cli import parser, cmd_defconfig
           from unixnu.config import Context
-          ctx = Context(parser().parse_args(['defconfig', os.environ['DEFCONFIG']]))
+          from pathlib import Path
+          from unixnu.config import load_toml
+          raw = load_toml(Path('device/board.toml'))
+          config = os.environ['DEFCONFIG']
+          matches = [profile for profile, name in raw.get('package', {}).get('defconfig', {}).items() if name == config]
+          if len(matches) > 1:
+              sys.exit(f'::error::{config} maps to multiple OS profiles: {matches}')
+          profile = matches[0] if matches else raw.get('board', {}).get('os_profile', '')
+          if not profile:
+              sys.exit('::error::could not determine the OS profile for this defconfig')
+          ctx = Context(parser().parse_args(['defconfig', '--os', profile, config]))
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              print(f'BUILD_OS_PROFILE={profile}', file=env)
           cmd_defconfig(ctx)
           board = ctx.board
           name = board.get('board', {}).get('name')
@@ -156,6 +221,15 @@ jobs:
           # the archive builders, and everything else uses Xcode's clang. LLD is a separate formula since LLVM 23;
           # the payload step links the panic screen with ld.lld.
           brew install llvm lld mtools dtc
+          if [[ "$STEPS" == *userdata* || "$STEPS" == *payload* ]]; then
+            brew install blacktop/tap/ipsw
+            command -v ipsw aea
+          fi
+          if [[ "$STEPS" == *payload* && "$DEFCONFIG" == sheng_ipados27_defconfig ]]; then
+            brew install glslang shaderc spirv-tools bison pkgconf
+            rustup toolchain install 1.98.0 --profile minimal --component rust-src
+            echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          fi
           if ! command -v unifdef >/dev/null; then
             brew install unifdef
             echo "$(brew --prefix unifdef)/bin" >> "$GITHUB_PATH"
@@ -168,8 +242,8 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk iphoneos --find mig
-          clang --version | head -n 1
-          "$(brew --prefix llvm)/bin/clang" --version | head -n 1
+          clang --version | sed -n '1p'
+          "$(brew --prefix llvm)/bin/clang" --version | sed -n '1p'
           python3 --version
           missing=0
           for tool in git make clang cmake ninja unifdef ld.lld mformat mcopy dtc xcodebuild; do
@@ -209,20 +283,99 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash -euo pipefail -c "$PRE_BUILD"
 
+      - name: Prepare pinned Wi-Fi sources for sheng runtime
+        if: contains(inputs.steps, 'payload') && inputs.defconfig == 'sheng_ipados27_defconfig'
+        working-directory: device
+        run: |
+          git submodule update --init --depth 1 -- drivers/Ath12kWifi
+          # The component checks HEAD against its lock. FreeBSD's release branch advances.
+          wifi=drivers/Ath12kWifi
+          lock="$wifi/tools/source-lock.json"
+          src="$wifi/deps/freebsd"
+          mkdir -p "$src"
+          git -C "$src" init -q
+          git -C "$src" remote add origin "$(jq -er '.freebsd.url' "$lock")"
+          git -C "$src" sparse-checkout init --cone
+          jq -er '.freebsd.paths[] | sub("^/"; "") | sub("/$"; "")' "$lock" | git -C "$src" sparse-checkout set --stdin
+          git -C "$src" fetch --depth=1 --filter=blob:none origin "$(jq -er '.freebsd.commit' "$lock")"
+          git -C "$src" checkout -q --detach FETCH_HEAD
+          python3 drivers/Ath12kWifi/tools/fetch-sources.py
+          python3 drivers/Ath12kWifi/tools/fetch-sources.py --check
+
+      - name: Prepare pinned Bluetooth kernel sources for sheng
+        if: contains(inputs.steps, 'payload') && inputs.defconfig == 'sheng_ipados27_defconfig'
+        working-directory: device
+        run: |
+          git submodule update --init --depth 1 -- drivers/QcaBluetooth
+          lock=drivers/QcaBluetooth/tools/source-lock.json
+          export QBT_LINUX_TREE="$RUNNER_TEMP/qbt-linux"
+          base=$(jq -er '.repository | sub("^https://github.com/"; "https://raw.githubusercontent.com/")' "$lock")
+          rev=$(jq -er '.commit' "$lock")
+          jq -r '.files | keys[]' "$lock" | while IFS= read -r path; do
+            dest="$QBT_LINUX_TREE/$path"
+            mkdir -p "$(dirname "$dest")"
+            curl -fsSL --retry 4 --retry-all-errors --connect-timeout 15 --max-time 60 "$base/$rev/$path" -o "$dest"
+          done
+          python3 drivers/QcaBluetooth/tools/prepare-linux.py
+          echo "QBT_LINUX_TREE=$QBT_LINUX_TREE" >> "$GITHUB_ENV"
+
+      - name: Build userdata
+        id: userdata
+        if: contains(inputs.steps, 'userdata')
+        env:
+          WORK: ${{ steps.check.outputs.work }}
+        run: |
+          ./unixnu build --os "$BUILD_OS_PROFILE" userdata
+          test -s "${WORK}/userdata/userdata-root.img"
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Package userdata image
+        if: contains(inputs.steps, 'image') && steps.userdata.outcome == 'success'
+        env:
+          WORK: ${{ steps.check.outputs.work }}
+        run: python3 scripts/package-userdata-artifact.py "$WORK/userdata" "$RUNNER_TEMP/recipient.pem" "$RUNNER_TEMP/userdata-artifact"
+
+      - name: Upload userdata image
+        if: contains(inputs.steps, 'image') && steps.userdata.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unixnu-${{ steps.check.outputs.board }}-userdata-image-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/userdata-artifact/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Extract pinned device firmware
+        if: hashFiles('device/proprietary-files.txt') != '' && hashFiles('device/scripts/extract-files.py') != ''
+        run: |
+          args=(--device device)
+          if [[ "$DEFCONFIG" != sheng_ipados27_defconfig || "$STEPS" != *payload* ]]; then
+            args+=(--section Keyboard)
+          fi
+          python3 device/scripts/extract-files.py "${args[@]}"
+          python3 device/scripts/extract-files.py "${args[@]}" --check
+
       - name: Build kernel
         id: kernel
         env:
           # prepare-xnu-source.py lists Apple sources through the GitHub API; anonymous calls from hosted runners hit
           # the shared rate limit (HTTP 403).
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./unixnu build kernel
-
-      - name: Build userdata
-        id: userdata
-        if: contains(inputs.steps, 'userdata')
+          INIT_DATA: ${{ inputs.init_data }}
         run: |
-          ./unixnu build userdata
-          df -h "$GITHUB_WORKSPACE"
+          args=(kernel)
+          if [ "$INIT_DATA" = true ]; then
+            args+=(runtime --init-data)
+          elif [ -f "$RUNNER_TEMP/data.dbr" ]; then
+            args+=(--data-ramdisk "$RUNNER_TEMP/data.dbr")
+          fi
+          ./unixnu build --os "$BUILD_OS_PROFILE" "${args[@]}"
+
+      - name: Measure fileset code space after a failed kernel build
+        if: failure() && steps.kernel.outcome == 'failure'
+        run: |
+          PYTHONPATH=scripts python3 scripts/fileset-space.py "$BUILD_OS_PROFILE"
+          PYTHONPATH=scripts python3 scripts/prelink-evidence.py "$BUILD_OS_PROFILE"
 
       - name: Build payload
         id: payload
@@ -232,6 +385,7 @@ jobs:
           SKIP_SETUP: ${{ inputs.skip_setup }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
         run: |
+          export PATH="$(brew --prefix lld)/bin:$PATH"
           args=()
           if [ -f "$RUNNER_TEMP/trustcache" ]; then
             if [ "$OWNER_TRUST_CACHE" = true ]; then
@@ -242,7 +396,35 @@ jobs:
           fi
           if [ -f "$RUNNER_TEMP/data.dbr" ]; then args+=(--data-ramdisk "$RUNNER_TEMP/data.dbr"); fi
           if [ "$SKIP_SETUP" = true ]; then args+=(--skip-setup); fi
-          ./unixnu build payload "${args[@]}"
+          ./unixnu build --os "$BUILD_OS_PROFILE" payload "${args[@]}"
+
+      - name: Build boot image
+        id: image
+        if: contains(inputs.steps, 'image')
+        env:
+          WORK: ${{ steps.check.outputs.work }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
+          ./unixnu build --os "$BUILD_OS_PROFILE" package firmware
+          test -s "$WORK/userdata/userdata-root.img"
+          test -s "$WORK/payload/payload.img"
+          ./unixnu bootimg --os "$BUILD_OS_PROFILE" --ramdisk "$WORK/payload/payload.img"
+          cd "$WORK/boot"
+          test -s boot.img
+          shasum -a 256 boot.img > "$RUNNER_TEMP/boot.img.sha256"
+          openssl cms -encrypt -binary -aes-256-cbc -in boot.img -outform DER -out "$RUNNER_TEMP/boot.img.cms" "$RUNNER_TEMP/recipient.pem"
+
+      - name: Upload boot image
+        if: "!cancelled() && steps.image.outcome == 'success'"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unixnu-${{ steps.check.outputs.board }}-boot-image-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/boot.img.cms
+            ${{ runner.temp }}/boot.img.sha256
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Collect the text logs
         id: logs
@@ -252,8 +434,8 @@ jobs:
           BOARD: ${{ steps.check.outputs.board }}
           WORK: ${{ steps.check.outputs.work }}
         run: |
-          # Only *.log files are copied, with the secrets and the input URLs replaced. Kernels, payloads, disk images,
-          # kernelcaches and IPSW members are never uploaded: they derive from Apple software.
+          # Logs are redacted before upload. Binary firmware inputs and images are excluded here; boot.img has a separate,
+          # explicit upload step for image runs.
           python3 - <<'PY'
           import os, re, shutil
           from pathlib import Path
@@ -264,7 +446,7 @@ jobs:
           event = Path(os.environ['GITHUB_EVENT_PATH']).read_text()
           import json
           inputs = json.loads(event).get('inputs', {})
-          secrets = [os.environ.get('UNIXNU_UNIQUE_CHIP_ID', ''), inputs.get('trust_cache_url', ''), inputs.get('data_seed_url', '')]
+          secrets = [os.environ.get('UNIXNU_UNIQUE_CHIP_ID', ''), *(inputs.get(key, '') for key in ('ipsw_url', 'trust_cache_url', 'data_seed_url'))]
           secrets = [value for value in secrets if value]
           count = 0
           for path in sorted(source.glob('*.log')) if source.is_dir() else []:
@@ -296,6 +478,7 @@ jobs:
           KERNEL: ${{ steps.kernel.outcome }}
           USERDATA: ${{ steps.userdata.outcome }}
           PAYLOAD: ${{ steps.payload.outcome }}
+          IMAGE: ${{ steps.image.outcome }}
         run: |
           {
             echo "## macOS build: ${BOARD:-unknown} (${DEFCONFIG}, ${STEPS})"
@@ -305,9 +488,10 @@ jobs:
             echo "| kernel | ${KERNEL:-skipped} |"
             echo "| userdata | ${USERDATA:-skipped} |"
             echo "| payload | ${PAYLOAD:-skipped} |"
+            echo "| boot image | ${IMAGE:-skipped} |"
             echo
-            echo "This workflow only checks that the build works. It publishes text logs (7 days) and no images."
-            xcodebuild -version | head -n 1
+            echo "Text logs are retained for 7 days. Requested images are encrypted. Boot is retained for 7 days and userdata for 1 day."
+            xcodebuild -version | sed -n '1p'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove proprietary inputs

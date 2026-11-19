@@ -27,9 +27,7 @@ args = parser.parse_args()
 SOURCE = args.source.resolve()
 if subprocess.check_output(['git', '-C', str(SOURCE), 'rev-parse', 'HEAD'], text=True).strip() != PIN:
     raise SystemExit('Translator revision differs from the qualified source pin')
-PATCHES = [ROOT / 'drivers/AdrenoMetal/bridge/patches' / name for name in [
-    '0063-main-optimizations-on-development-46e7cc96.patch',
-    '0064-copies-leave-unreachable-pages-alone.patch']]
+PATCHES = [ROOT / name for name in json.loads((ROOT / 'scripts/data/metal2vulkan-patches.json').read_text())]
 
 
 def git_tree(*steps):

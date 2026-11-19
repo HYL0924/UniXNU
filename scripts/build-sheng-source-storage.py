@@ -206,6 +206,12 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
                device_source('SourceRootBinding.cpp'), device_source('BootLog.c'), boot_log_defaults, device_source('BootReset.c'),
                ROOT / 'kits/VerifiedRoot/src/verified_root.c',
                ROOT / 'kits/VerifiedRoot/adapters/xnu_crypto.c', anchor]
+    if os.environ.get('UNIXNU_XNU_TARGET') != 'macosx':
+        # The iPadOS profile has no loader-memory release hook; deny the optional RAM seed release.
+        fallback = out / 'iOSKernelApiFallback.cpp'
+        fallback.write_text('#include <mach/vm_types.h>\n'
+                            'extern "C" bool ml_static_mfree_prepare(vm_offset_t, vm_size_t) { return false; }\n')
+        sources.append(fallback)
     if int(os.environ['UNIXNU_IOS_VERSION'].split('.')[0]) >= 27:
         # The source path does not run BootProgress's process worker. Reuse its
         # native capture code in a separate worker owned by the UFS log.

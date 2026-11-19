@@ -302,6 +302,23 @@ jobs:
           python3 drivers/Ath12kWifi/tools/fetch-sources.py
           python3 drivers/Ath12kWifi/tools/fetch-sources.py --check
 
+      - name: Prepare pinned Bluetooth kernel sources for sheng
+        if: contains(inputs.steps, 'payload') && inputs.defconfig == 'sheng_ipados27_defconfig'
+        working-directory: device
+        run: |
+          git submodule update --init --depth 1 -- drivers/QcaBluetooth
+          lock=drivers/QcaBluetooth/tools/source-lock.json
+          export QBT_LINUX_TREE="$RUNNER_TEMP/qbt-linux"
+          base=$(jq -er '.repository | sub("^https://github.com/"; "https://raw.githubusercontent.com/")' "$lock")
+          rev=$(jq -er '.commit' "$lock")
+          jq -r '.files | keys[]' "$lock" | while IFS= read -r path; do
+            dest="$QBT_LINUX_TREE/$path"
+            mkdir -p "$(dirname "$dest")"
+            curl -fsSL --retry 4 --retry-all-errors --connect-timeout 15 --max-time 60 "$base/$rev/$path" -o "$dest"
+          done
+          python3 drivers/QcaBluetooth/tools/prepare-linux.py
+          echo "QBT_LINUX_TREE=$QBT_LINUX_TREE" >> "$GITHUB_ENV"
+
       - name: Build userdata
         id: userdata
         if: contains(inputs.steps, 'userdata')

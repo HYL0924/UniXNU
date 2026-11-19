@@ -1,0 +1,5 @@
+[
+  "drivers/AdrenoMetal/bridge/patches/0063-main-optimizations-on-development-46e7cc96.patch",
+  "drivers/AdrenoMetal/bridge/patches/0064-copies-leave-unreachable-pages-alone.patch",
+  "scripts/data/metal2vulkan-ios-read-pages.patch"
+]

@@ -40,14 +40,7 @@ def fail(why):
 
 
 # The patch list exactly as the bridge build reads it.
-build = (ROOT / 'scripts/build-adreno-metal-bridge.py').read_text()
-listed = build[build.index('PATCHES = ['):build.index(']]', build.index('PATCHES = ['))]
-names = re.findall(r"'(\d{4}-[^']+\.patch)'", listed)
-directory = ROOT / 'drivers/AdrenoMetal/bridge/patches'
-on_disk = sorted(p.name for p in directory.glob('*.patch'))
-if sorted(names) != on_disk:
-    fail('the build lists %s, the directory holds %s' % (names, on_disk))
-patches = [directory / name for name in names]
+patches = [ROOT / name for name in json.loads((ROOT / 'scripts/data/metal2vulkan-patches.json').read_text())]
 
 git('fetch', '-q', 'origin', '+refs/heads/%s:refs/remotes/origin/%s' % (branch, branch))
 tip = git('rev-parse', 'origin/' + branch).stdout.strip()

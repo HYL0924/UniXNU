@@ -352,6 +352,15 @@ def prelink(ctx):
     # A failed rebuild must not remove the last candidate or its record.
     with tempfile.TemporaryDirectory(dir=output.parent, prefix='.prelink-') as directory:
         candidate = Path(directory) / output.name
+        if spec.get('reviewed_symbols'):
+            # XnuPrelink includes adjacent fixtures in its matcher cache signature.
+            # Stage a private copy so concurrent profiles never modify a shared checkout.
+            source_tool = ctx.tree / spec['tool']
+            tool_dir = Path(directory) / 'XnuPrelink'
+            shutil.copytree(source_tool.parent, tool_dir, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+            fixture = ctx.tree / spec['reviewed_symbols']
+            shutil.copyfile(fixture, tool_dir / 'fixtures' / fixture.name)
+            command[1] = tool_dir / source_tool.name
         saved_map = output.with_suffix('.map.json')
         candidate_map = candidate.with_suffix('.map.json')
         if saved_map.is_file():

@@ -1,0 +1,36 @@
+{
+  "inputs": {
+    "kernelcache_sha256": "38e6d9fa5f789b8228f4617ef4c6d2a3fd8ab564abdc9b62920f1db53fc1780a",
+    "entry": "com.apple.kernel"
+  },
+  "functions": [
+    {
+      "original": "0xfffffe000b412984",
+      "original_size": 384,
+      "original_sha256": "31d0e0fa482b2fa90257b6873f89e331bc51a5c12cbe324bee595fe06e5585a5",
+      "native_symbol": "__ZN8OSSymbol17withCStringNoCopyEPKc",
+      "evidence": "IORegistryEntry::initialize passes IOName at 0xfffffe000b4515ec to this function at the next instruction. The source uses withCStringNoCopy for that key. RELEASE reference also names this exact entry."
+    },
+    {
+      "original": "0xfffffe000aec5fac",
+      "original_size": 52,
+      "original_sha256": "392c95f5d1bfc12d57b6fbd680d3630e803ff30d70dcc69e9ea12f0be46fb53b",
+      "native_symbol": "_ml_at_interrupt_context",
+      "evidence": "machine_routines_common.c: tests that interrupts are disabled before reading the current CPU interrupt-state pointer and returning whether it is non-null. The original tests DAIF and then follows TPIDR_EL1 to cpu_int_state."
+    },
+    {
+      "original": "0xfffffe000b4a6bbc",
+      "original_size": 324,
+      "original_sha256": "be09ea860504cd54870ab494a20bf8f3c3acda9e540909657053f4a807582518",
+      "native_symbol": "__ZN24IOBufferMemoryDescriptor9withBytesEPKvmjb",
+      "evidence": "The four arguments are saved. The factory allocates the descriptor, calls initWithPhysicalMask with kernel_task, derives contiguous options from the boolean, sets length to zero and calls appendBytes with the saved source and length. Matches IOBufferMemoryDescriptor.cpp and the arm64 IOKit export."
+    },
+    {
+      "original": "0xfffffe000b4bb63c",
+      "original_size": 12,
+      "original_sha256": "6240b6a6309c0e043e5ba016cc8eb9ee21d5247fabbea77e52c9cae3e90b0e38",
+      "native_symbol": "__ZN18IOMemoryDescriptor8getFlagsEv",
+      "evidence": "Direct nonvirtual getter between withPersistentMemoryDescriptor and copySharingContext. Loads the 32-bit _flags at object offset 0x20 and returns it zero extended to 64 bits. getDirection masks the field and getTag uses a later field and a virtual slot."
+    }
+  ]
+}

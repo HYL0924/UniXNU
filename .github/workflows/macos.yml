@@ -84,6 +84,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  UNIXNU_IPSW_JOBS: 8
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
   HOMEBREW_NO_ENV_HINTS: 1
@@ -220,6 +221,15 @@ jobs:
           # the archive builders, and everything else uses Xcode's clang. LLD is a separate formula since LLVM 23;
           # the payload step links the panic screen with ld.lld.
           brew install llvm lld mtools dtc
+          if [[ "$STEPS" == *userdata* || "$STEPS" == *payload* ]]; then
+            brew install blacktop/tap/ipsw
+            command -v ipsw aea
+          fi
+          if [[ "$STEPS" == *payload* && "$DEFCONFIG" == sheng_ipados27_defconfig ]]; then
+            brew install glslang shaderc spirv-tools bison pkgconf
+            rustup toolchain install 1.98.0 --profile minimal --component rust-src
+            echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          fi
           if ! command -v unifdef >/dev/null; then
             brew install unifdef
             echo "$(brew --prefix unifdef)/bin" >> "$GITHUB_PATH"
@@ -273,6 +283,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash -euo pipefail -c "$PRE_BUILD"
 
+      - name: Build userdata
+        id: userdata
+        if: contains(inputs.steps, 'userdata')
+        env:
+          WORK: ${{ steps.check.outputs.work }}
+        run: |
+          ./unixnu build --os "$BUILD_OS_PROFILE" userdata
+          test -s "${WORK}/userdata/userdata-root.img"
+          df -h "$GITHUB_WORKSPACE"
+
       - name: Extract pinned keyboard firmware
         if: hashFiles('device/proprietary-files.txt') != '' && hashFiles('device/scripts/extract-files.py') != ''
         run: python3 device/scripts/extract-files.py --section Keyboard --device device
@@ -298,16 +318,6 @@ jobs:
         run: |
           PYTHONPATH=scripts python3 scripts/fileset-space.py "$BUILD_OS_PROFILE"
           PYTHONPATH=scripts python3 scripts/prelink-evidence.py "$BUILD_OS_PROFILE"
-
-      - name: Build userdata
-        id: userdata
-        if: contains(inputs.steps, 'userdata')
-        env:
-          WORK: ${{ steps.check.outputs.work }}
-        run: |
-          ./unixnu build --os "$BUILD_OS_PROFILE" userdata
-          test -s "${WORK}/userdata/userdata-root.img"
-          df -h "$GITHUB_WORKSPACE"
 
       - name: Build payload
         id: payload

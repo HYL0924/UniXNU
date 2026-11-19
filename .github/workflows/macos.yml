@@ -288,6 +288,17 @@ jobs:
         working-directory: device
         run: |
           git submodule update --init --depth 1 -- drivers/Ath12kWifi
+          # The component checks HEAD against its lock. FreeBSD's release branch advances.
+          wifi=drivers/Ath12kWifi
+          lock="$wifi/tools/source-lock.json"
+          src="$wifi/deps/freebsd"
+          mkdir -p "$src"
+          git -C "$src" init -q
+          git -C "$src" remote add origin "$(jq -er '.freebsd.url' "$lock")"
+          git -C "$src" sparse-checkout init --cone
+          jq -er '.freebsd.paths[] | sub("^/"; "") | sub("/$"; "")' "$lock" | git -C "$src" sparse-checkout set --stdin
+          git -C "$src" fetch --depth=1 --filter=blob:none origin "$(jq -er '.freebsd.commit' "$lock")"
+          git -C "$src" checkout -q --detach FETCH_HEAD
           python3 drivers/Ath12kWifi/tools/fetch-sources.py
           python3 drivers/Ath12kWifi/tools/fetch-sources.py --check
 

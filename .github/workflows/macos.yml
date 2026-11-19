@@ -283,6 +283,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash -euo pipefail -c "$PRE_BUILD"
 
+      - name: Prepare pinned Wi-Fi sources for sheng runtime
+        if: contains(inputs.steps, 'payload') && inputs.defconfig == 'sheng_ipados27_defconfig'
+        working-directory: device
+        run: |
+          git submodule update --init --depth 1 -- drivers/Ath12kWifi
+          python3 drivers/Ath12kWifi/tools/fetch-sources.py
+          python3 drivers/Ath12kWifi/tools/fetch-sources.py --check
+
       - name: Build userdata
         id: userdata
         if: contains(inputs.steps, 'userdata')

@@ -16,7 +16,7 @@ on:
         required: true
         default: sheng_ipados27_defconfig
       steps:
-        description: Build the kernel, optionally a boot image (boot.img artifact), userdata or payload
+        description: Build the kernel, optionally userdata and payload, or deliver both boot and userdata images
         type: choice
         options:
           - kernel
@@ -34,7 +34,7 @@ on:
         required: true
         default: sheng
       image_recipient:
-        description: Base64 DER recipient certificate for encrypted boot.img delivery (kernel image only)
+        description: Base64 DER recipient certificate for encrypted boot and userdata image delivery
         required: false
         default: ""
       xcode:
@@ -329,6 +329,22 @@ jobs:
           test -s "${WORK}/userdata/userdata-root.img"
           df -h "$GITHUB_WORKSPACE"
 
+      - name: Package userdata image
+        if: contains(inputs.steps, 'image') && steps.userdata.outcome == 'success'
+        env:
+          WORK: ${{ steps.check.outputs.work }}
+        run: python3 scripts/package-userdata-artifact.py "$WORK/userdata" "$RUNNER_TEMP/recipient.pem" "$RUNNER_TEMP/userdata-artifact"
+
+      - name: Upload userdata image
+        if: contains(inputs.steps, 'image') && steps.userdata.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unixnu-${{ steps.check.outputs.board }}-userdata-image-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/userdata-artifact/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Extract pinned device firmware
         if: hashFiles('device/proprietary-files.txt') != '' && hashFiles('device/scripts/extract-files.py') != ''
         run: |
@@ -474,7 +490,7 @@ jobs:
             echo "| payload | ${PAYLOAD:-skipped} |"
             echo "| boot image | ${IMAGE:-skipped} |"
             echo
-            echo "Text logs are retained for 7 days. A requested boot image is retained as a separate artifact for 7 days."
+            echo "Text logs are retained for 7 days. Requested images are encrypted. Boot is retained for 7 days and userdata for 1 day."
             xcodebuild -version | sed -n '1p'
           } >> "$GITHUB_STEP_SUMMARY"
 
